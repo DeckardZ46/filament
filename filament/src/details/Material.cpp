@@ -605,13 +605,10 @@ void FMaterial::createAndCacheProgram(Program&& p, Variant variant) const noexce
     FEngine const& engine = mEngine;
     DriverApi& driverApi = mEngine.getDriverApi();
 
-    bool const isSharedVariant =
-            (mMaterialDomain == MaterialDomain::SURFACE) &&
-            !mIsDefaultMaterial && !mHasCustomDepthShader &&
-            Variant::isValidDepthVariant(variant);
-
     // Check if the default material has this program cached
-    if (isSharedVariant) {
+    if (mMaterialDomain == MaterialDomain::SURFACE &&
+            !mIsDefaultMaterial && !mHasCustomDepthShader &&
+            Variant::isValidDepthVariant(variant)) {
         FMaterial const* const pDefaultMaterial = engine.getDefaultMaterial();
         if (pDefaultMaterial) {
             auto program = pDefaultMaterial->mCachedPrograms[variant.key];
@@ -630,7 +627,9 @@ void FMaterial::createAndCacheProgram(Program&& p, Variant variant) const noexce
     // If the default material doesn't already have this program cached, and all caching conditions
     // are met (Surface Domain and no custom depth shader), cache it now.
     // New Materials will inherit these program automatically.
-    if (isSharedVariant) {
+    if (mMaterialDomain == MaterialDomain::SURFACE &&
+            !mIsDefaultMaterial && !mHasCustomDepthShader &&
+            Variant::isValidDepthVariant(variant)) {
         FMaterial const* const pDefaultMaterial = engine.getDefaultMaterial();
         if (pDefaultMaterial && !pDefaultMaterial->mCachedPrograms[variant.key]) {
             // set the tag to the default material name
@@ -1077,21 +1076,6 @@ void FMaterial::processPushConstants(FEngine& engine, MaterialParser const* pars
 }
 
 void FMaterial::precacheDepthVariants(FEngine& engine) {
-    // pre-cache all depth variants inside the default material. Note that this should be
-    // entirely optional; if we remove this pre-caching, these variants will be populated
-    // later, when/if needed by createAndCacheProgram(). Doing it now potentially uses more
-    // memory and increases init time, but reduces hiccups during the first frame.
-    if (UTILS_UNLIKELY(mIsDefaultMaterial)) {
-        auto const allDepthVariants = VariantUtils::getDepthVariants();
-        for (auto const variant: allDepthVariants) {
-            assert_invariant(Variant::isValidDepthVariant(variant));
-            if (hasVariant(variant)) {
-                prepareProgram(variant);
-            }
-        }
-        return;
-    }
-
     // if possible pre-cache all depth variants from the default material
     if (mMaterialDomain == MaterialDomain::SURFACE &&
             !mIsDefaultMaterial &&

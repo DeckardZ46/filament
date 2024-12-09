@@ -90,3 +90,59 @@ void evaluateDirectionalLight(const MaterialInputs material,
     color.rgb += surfaceShading(pixel, light, visibility);
 #endif
 }
+
+// *************** [deckard] mod direction light **************
+// simpler than default one
+void customEvaluateDirectionalLight(const MaterialInputs material,
+        const PixelParams pixel, inout vec3 color) {
+
+    Light light = getDirectionalLight();
+
+    float visibility = 1.0;
+
+    int channels = object_uniforms_flagsChannels & 0xFF;
+    if ((light.channels & channels) == 0) {
+        return;
+    }
+
+    // ------------- calculate visibility ---------------------
+    // note: here we still calculate self shadowing for those do not receive shadow
+    #if defined(VARIANT_HAS_SHADOWING)
+    if (light.NoL > 0.0) {
+        float ssContactShadowOcclusion = 0.0;
+
+        int cascade = getShadowCascade();
+        bool cascadeHasVisibleShadows = bool(frameUniforms.cascades & ((1 << cascade) << 8));
+        bool hasDirectionalShadows = bool(frameUniforms.directionalShadows & 1);
+        if (hasDirectionalShadows && cascadeHasVisibleShadows) {
+            highp vec4 shadowPosition = getShadowPosition(cascade);
+            visibility = shadow(true, light_shadowMap, cascade, shadowPosition, 0.0);
+            // shadow far attenuation
+            highp vec3 v = getWorldPosition() - getWorldCameraPosition();
+            // (viewFromWorld * v).z == dot(transpose(viewFromWorld), v)
+            highp float z = dot(transpose(getViewFromWorldMatrix())[2].xyz, v);
+            highp vec2 p = frameUniforms.shadowFarAttenuationParams;
+            visibility = 1.0 - ((1.0 - visibility) * saturate(p.x - z * z * p.y));
+        }
+        if ((frameUniforms.directionalShadows & 0x2) != 0 && visibility > 0.0) {
+            if ((object_uniforms_flagsChannels & FILAMENT_OBJECT_CONTACT_SHADOWS_BIT) != 0) {
+                ssContactShadowOcclusion = screenSpaceContactShadow(light.l);
+            }
+        }
+
+        visibility *= 1.0 - ssContactShadowOcclusion;
+
+        #if defined(MATERIAL_HAS_AMBIENT_OCCLUSION)
+        visibility *= computeMicroShadowing(light.NoL, material.ambientOcclusion);
+        #endif
+#if defined(MATERIAL_CAN_SKIP_LIGHTING)
+        if (visibility <= 0.0) {
+            return;
+        }
+#endif
+    }
+#endif
+
+    color.rgb += modSurfaceShading(pixel,light,visibility);
+}
+// ***************************************************************

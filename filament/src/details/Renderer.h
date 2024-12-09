@@ -188,6 +188,9 @@ private:
 
     void renderInternal(FView const* view);
     void renderJob(RootArenaScope& rootArenaScope, FView& view);
+    /******** deckard mods **************/
+    void customRenderJob(ArenaScope& arena, FView& view);
+    /************************************/
 
     // keep a reference to our engine
     FEngine& mEngine;

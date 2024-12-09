@@ -267,6 +267,155 @@ RendererUtils::ColorPassOutput RendererUtils::colorPass(
             .depth = colorPass->depth
     };
 }
+/******************* [deckard]: add custom color pass *******************/
+FrameGraphId<FrameGraphTexture> RendererUtils::customColorPass(
+        FrameGraph& fg, const char* name, FEngine& engine, FView const& view,
+        FrameGraphTexture::Descriptor const& colorBufferDesc,
+        ColorPassConfig const& config, PostProcessManager::ColorGradingConfig colorGradingConfig,
+        RenderPass::Executor const& passExecutor) noexcept {
+
+    /**
+     * Prepare color pass data
+    */
+    struct CustomColorPassData {
+        FrameGraphId<FrameGraphTexture> shadows;
+        FrameGraphId<FrameGraphTexture> color;
+        FrameGraphId<FrameGraphTexture> output;
+        FrameGraphId<FrameGraphTexture> depth;
+    };
+
+    Blackboard& blackboard = fg.getBlackboard();
+
+    /**
+     * Add color pass to frame graph
+    */
+    auto& colorPass = fg.addPass<CustomColorPassData>(name,
+            // --------------- set up ----------------------
+            [&](FrameGraph::Builder& builder, CustomColorPassData& data) {
+
+                TargetBufferFlags const clearColorFlags = config.clearFlags & TargetBufferFlags::COLOR;
+                TargetBufferFlags clearDepthFlags = config.clearFlags & TargetBufferFlags::DEPTH;
+
+                data.shadows = blackboard.get<FrameGraphTexture>("shadows");
+                data.color = blackboard.get<FrameGraphTexture>("color");
+                data.depth = blackboard.get<FrameGraphTexture>("depth");
+                
+                if (data.shadows) {
+                    data.shadows = builder.sample(data.shadows);
+                }
+
+                if (!data.color) {
+                    data.color = builder.createTexture("Color Buffer", colorBufferDesc);
+                }
+
+                const bool canResolveDepth = engine.getDriverApi().isAutoDepthResolveSupported();
+
+                // if there's no depth buffer, create one.
+                if (!data.depth) {
+                    clearDepthFlags = TargetBufferFlags::DEPTH;
+                    const char* const name = "Depth Buffer";
+
+                    bool const isES2 =
+                            engine.getActiveFeatureLevel() == FeatureLevel::FEATURE_LEVEL_0;
+
+                    TextureFormat const depthOnlyFormat = isES2 ?
+                            TextureFormat::DEPTH24 : TextureFormat::DEPTH32F;
+
+                    TextureFormat const format = depthOnlyFormat;
+
+                    data.depth = builder.createTexture(name, {
+                            .width = colorBufferDesc.width,
+                            .height = colorBufferDesc.height,
+                            .samples = canResolveDepth ? colorBufferDesc.samples : uint8_t(config.msaa),
+                            .format = format,
+                    });
+                }
+
+                if (colorGradingConfig.asSubpass) {
+                    data.output = builder.createTexture("Tonemapped Buffer", {
+                            .width = colorBufferDesc.width,
+                            .height = colorBufferDesc.height,
+                            .format = colorGradingConfig.ldrFormat
+                    });
+                    data.color = builder.read(data.color, FrameGraphTexture::Usage::SUBPASS_INPUT);
+                    data.output = builder.write(data.output, FrameGraphTexture::Usage::COLOR_ATTACHMENT);
+                } else if (colorGradingConfig.customResolve) {
+                    data.color = builder.read(data.color, FrameGraphTexture::Usage::SUBPASS_INPUT);
+                }
+
+                data.color = builder.read(data.color, FrameGraphTexture::Usage::COLOR_ATTACHMENT);
+                data.depth = builder.read(data.depth, FrameGraphTexture::Usage::DEPTH_ATTACHMENT);
+
+                data.color = builder.write(data.color, FrameGraphTexture::Usage::COLOR_ATTACHMENT);
+                data.depth = builder.write(data.depth, FrameGraphTexture::Usage::DEPTH_ATTACHMENT);
+
+                builder.declareRenderPass("Color Pass Target", {
+                        .attachments = { .color = { data.color, data.output },
+                        .depth = data.depth},
+                        .clearColor = config.clearColor,
+                        .samples = config.msaa,
+                        .clearFlags = clearColorFlags | clearDepthFlags});
+
+                // add depth to blackboard
+                blackboard["depth"] = data.depth;
+            },
+            // ------------------- execute -----------------------------
+            [=, &view, &engine](FrameGraphResources const& resources,
+                    CustomColorPassData const& data, DriverApi& driver) {
+                auto out = resources.getRenderPassInfo();
+
+                view.prepareShadowMapping(view.getVsmShadowOptions().highPrecision);
+
+                // set shadow sampler
+                view.prepareShadow(data.shadows ?
+                        resources.getTexture(data.shadows) : engine.getOneTextureArray());
+
+                // prepare viewport
+                assert_invariant(
+                        out.params.viewport.width == resources.getDescriptor(data.color).width);
+                assert_invariant(
+                        out.params.viewport.height == resources.getDescriptor(data.color).height);
+
+                view.prepareViewport(static_cast<filament::Viewport&>(out.params.viewport),
+                        config.logicalViewport);
+
+                // commit uniform
+                view.commitUniforms(driver);
+
+                if (view.getBlendMode() == BlendMode::TRANSLUCENT) {
+                    if (any(out.params.flags.discardStart & TargetBufferFlags::COLOR0)) {
+                        // if the buffer is discarded, clear it to transparent
+                        out.params.flags.clear |= TargetBufferFlags::COLOR;
+                        out.params.clearColor = {};
+                    }
+                }
+
+                // todo: what does subpassMask do?
+                if (colorGradingConfig.asSubpass || colorGradingConfig.customResolve) {
+                    out.params.subpassMask = 1;
+                }
+
+                // this is a good time to flush the CommandStream,
+                // because we're about to potentiallyoutput a lot of commands. 
+                engine.flush();
+                driver.beginRenderPass(out.target, out.params);
+                passExecutor.execute(engine, resources.getPassName());
+                driver.endRenderPass();
+
+                // color pass is typically heavy, and we don't have much CPU work left after
+                // this point, so flushing now allows us to start the GPU earlier and reduce
+                // latency, without creating bubbles.
+                driver.flush();
+            }
+    );
+
+    // when color grading is done as a subpass, the output of the color-pass is the ldr buffer
+    auto output = colorGradingConfig.asSubpass ? colorPass->output : colorPass->color;
+
+    blackboard["color"] = output;
+    return output;
+}
+// *********************************************************************************
 
 std::optional<RendererUtils::ColorPassOutput> RendererUtils::refractionPass(
         FrameGraph& fg, FEngine& engine, FView const& view,

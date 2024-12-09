@@ -135,7 +135,6 @@ struct MetalContext {
     bool supportsTextureSwizzling = false;
     bool supportsAutoDepthResolve = false;
     bool supportsMemorylessRenderTargets = false;
-    bool supportsDepthClamp = false;
     uint8_t maxColorRenderTargets = 4;
     struct {
         uint8_t common;

@@ -150,3 +150,21 @@ vec3 surfaceShading(const PixelParams pixel, const Light light, float occlusion)
     return (color * light.colorIntensity.rgb) *
             (light.colorIntensity.w * light.attenuation * NoL * occlusion);
 }
+
+// **************** [deckard] mod surface shading ******************
+vec3 modSurfaceShading(const PixelParams pixel, const Light light, float occlusion){
+    vec3 h = normalize(shading_view + light.l);
+    float NoV = shading_NoV;
+    float NoL = saturate(light.NoL);
+    float NoH = saturate(dot(shading_normal, h));
+    float LoH = saturate(dot(light.l, h));
+
+    vec3 Fd = diffuseLobe(pixel, NoV, NoL, LoH);
+    vec3 Fr = specularLobe(pixel, light, h, NoV, NoL, NoH, LoH);
+
+    vec3 color = Fd + Fr;
+
+    return (color * light.colorIntensity.rgb) *
+            (light.colorIntensity.w * light.attenuation * NoL * occlusion);
+}
+// *****************************************************************

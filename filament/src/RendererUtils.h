@@ -98,6 +98,15 @@ public:
             ColorPassConfig const& config,
             PostProcessManager::ColorGradingConfig colorGradingConfig,
             RenderPass::Executor passExecutor) noexcept;
+    
+    /************** deckard mods ***********************/
+    FrameGraphId<FrameGraphTexture> RendererUtils::customColorPass(
+        FrameGraph& fg, const char* name, FEngine& engine, FView const& view,
+        FrameGraphTexture::Descriptor const& colorBufferDesc,
+        ColorPassConfig const& config, PostProcessManager::ColorGradingConfig colorGradingConfig,
+        RenderPass::Executor const& passExecutor)
+
+    /***************************************************/
 
     static std::optional<RendererUtils::ColorPassOutput> refractionPass(
             FrameGraph& fg, FEngine& engine, FView const& view,

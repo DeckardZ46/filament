@@ -287,10 +287,24 @@ vec4 evaluateLights(const MaterialInputs material) {
 
     // We always evaluate the IBL as not having one is going to be uncommon,
     // it also saves 1 shader variant
+// *********** [deckard] add ***************
+#if defined(SHADING_MODEL_SPECULAR_GLOSSINESS)
     evaluateIBL(material, pixel, color);
+#else
+    customEvaluateIBL(material, pixel, color);
+#endif
+    // *****************************************
 
 #if defined(VARIANT_HAS_DIRECTIONAL_LIGHTING)
-    evaluateDirectionalLight(material, pixel, color);
+    // evaluateDirectionalLight(material, pixel, color);
+
+    // *********** [deckard] add ***************
+#if defined(SHADING_MODEL_SPECULAR_GLOSSINESS)
+    // evaluateDirectionalLight(material, pixel, color);
+#else
+    customEvaluateDirectionalLight(material, pixel, color);
+#endif
+    // *****************************************
 #endif
 
 #if defined(VARIANT_HAS_DYNAMIC_LIGHTING)

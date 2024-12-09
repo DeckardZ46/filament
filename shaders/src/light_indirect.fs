@@ -672,3 +672,39 @@ void evaluateIBL(const MaterialInputs material, const PixelParams pixel, inout v
     color.rgb += Ft;
 #endif
 }
+
+// **************** [deckard add] custom IBL ************************* 
+// simpler than default one
+void customEvaluateIBL(const MaterialInputs material, const PixelParams pixel, inout vec3 color){
+    // --------------- specular ------------------------
+    vec3 Fr = vec3(0.0);
+    const vec4 ssrFr = vec4(0.0); // no ssr!
+
+#if IBL_INTEGRATION == IBL_INTEGRATION_PREFILTERED_CUBEMAP
+    vec3 E = specularDFG(pixel);
+    if (ssrFr.a < 1.0) { // prevent reading the IBL if possible
+        vec3 r = getReflectedVector(pixel, shading_normal);
+        Fr = E * prefilteredRadiance(r, pixel.perceptualRoughness);
+    }
+#elif IBL_INTEGRATION == IBL_INTEGRATION_IMPORTANCE_SAMPLING
+    vec3 E = vec3(0.0); // TODO: fix for importance sampling
+    if (ssrFr.a < 1.0) { // prevent evaluating the IBL if possible
+        Fr = isEvaluateSpecularIBL(pixel, shading_normal, shading_view, shading_NoV);
+    }
+#endif
+
+    // ------------------- diffuse -------------------------
+    vec3 diffuseNormal = shading_normal;
+#if IBL_INTEGRATION == IBL_INTEGRATION_PREFILTERED_CUBEMAP
+    vec3 diffuseIrradiance = diffuseIrradiance(diffuseNormal);
+#elif IBL_INTEGRATION == IBL_INTEGRATION_IMPORTANCE_SAMPLING
+    vec3 diffuseIrradiance = isEvaluateDiffuseIBL(pixel, diffuseNormal, shading_view);
+#endif
+    vec3 Fd = pixel.diffuseColor * diffuseIrradiance * (1.0 - E);
+
+    Fr *= frameUniforms.iblLuminance;
+    Fd *= frameUniforms.iblLuminance;
+    color.rgb += Fr + Fd;
+    color.rgb *= 1.65;
+}
+// ********************************************************************
